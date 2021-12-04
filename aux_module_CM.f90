@@ -13,14 +13,15 @@ contains
       qold,qold2,qnew,qnew2,aux,auxu,type_supper,type_sunder,dist_to_ecen_up,&
       dist_to_ecen_down,order,un_area_ij,up_area_ij,area_supper,area_sunder,&
       intersections,wall_height,dt,dx,dy,mx,my,ecen_un_x,ecen_un_y,&
-      ecen_up_x,ecen_up_y,cen_grid_up,cen_grid_down,lengths_sunder,lengths_supper)
+      ecen_up_x,ecen_up_y,cen_grid_up,cen_grid_down,lengths_sunder,lengths_supper,&
+      mthlim)
 
       ! This subroutine updates qnew and qnew2 such that at the small cells the cell merging
       ! method is applied, using qold and qold2.
       ! Order can be 1 (where no reconstruction at cuts are made) or 2 (with reconstruction)
 
       implicit none
-      integer :: N_cells,type_supper(:),type_sunder(:),mx,my,ilat3
+      integer :: N_cells,type_supper(:),type_sunder(:),mx,my,ilat3,mthlim(3)
       integer :: order, i,j,i_0,j_0,ii(:),jj(:),ixy,itop,ibot,ilat,ilat2,is
       real(8) fp(3,-1:mx+2,-1:my+2)
       real(8) fm(3,-1:mx+2,-1:my+2)
@@ -43,11 +44,10 @@ contains
       real(8) :: cm_avg2(3),q1(3),q2(3),q3(3),q4(3),q5(3),q6(3)
       real(8) :: q1l(3),q2l(3),q3l(3),q4l(3),q5l(3),q6l(3),cm_avg(3)
       real(8) :: aux_un,aux_up,wall_height,temp_dist(2)
-      real(8) :: un_area_ij(-1:mx+2,-1:my+2),up_area_ij(-1:mx+2,-1:my+2)
-      real(8) :: amdq(3),apdq(3),amdq_wall(3),apdq_wall(3),amdq_l(3),apdq_l(3)
-      real(8) :: amdq_r(3),apdq_r(3),s(3),fwave(3,3),area_sunder(:),area_supper(:)
-
-        order = 2
+      real(8) :: un_area_ij(-1:mx+2,-1:my+2),up_area_ij(-1:mx+2,-1:my+2),apdq_l(3,3)
+      real(8) :: amdq(3,3),apdq(3,3),amdq_wall(3),apdq_wall(3),amdq_l(3,3)
+      real(8) :: amdq_r(3,3),apdq_r(3,3),s(3,3),fwave(3,3,3),area_sunder(:),area_supper(:)
+      real(8) :: amdq_c(3),apdq_c(3)
         do i=1,N_cells
           i_0 = ii(i)
           j_0 = jj(i)
@@ -66,12 +66,12 @@ contains
              ! get the fluctuations at each cell edge:
               ! get the cell edge value via gradient:
               ! barrier edge at indexed small cell
-               q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
-                 ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
+               q1 = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
+                 + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
               aux_up = auxu(1,i_0,j_0)
 
-               q1l = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
-                 ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
+               q1l = qold(:,i_0,j_0) + gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
+                 + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
                aux_un = aux(1,i_0,j_0)
              else
                q1 = qold2(:,i_0,j_0)
@@ -86,31 +86,27 @@ contains
 
               ! at the edge 2:
               if (order .eq. 2) then
-                q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,2,i) &
-                  ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,2,i)   ! at the barrier center
-               aux_up = auxu(1,i_0,j_0)
-               temp_dist = ecen_up_x(:,1,i)-cen_grid_up(:,i_0-1,j_0)
-               q1l = qold2(:,i_0-1,j_0)! + gradQ2(:,1,i_0-1,j_0)*temp_dist(1) &
-                ! + gradQ2(:,2,i_0-1,j_0)*temp_dist(2)
-                call riemann_solver(q1l,q1,auxu(1,i_0-1,j_0),aux_up,s,fwave,&
-                    amdq,apdq,1)
+                call riemann_solver(qold2(:,i_0-2:i_0,j_0),qold2(:,i_0-1:i_0+1,j_0),&
+                   auxu(1,i_0-2:i_0,j_0),auxu(1,i_0-1:i_0+1,j_0),s,fwave,&
+                    amdq,apdq,1,2,dt/dx,mthlim(3))
+                apdq_c = apdq(:,2)
               else
-                apdq = fp2(:,i_0,j_0)
+                apdq_c = fp2(:,i_0,j_0)
               end if
 
               cm_avg2 = cm_avg2 - dt/dx * lengths_supper(3,i)*(1/(area_supper(i)+&
-                  up_area_ij(i_0,j_0+1)))* apdq
+                  up_area_ij(i_0,j_0+1)))* apdq_c
 
               ! at the merging neighbor cell edges:
               ! at the barrier edge and moving clockwise
               x = intersections(1,i+2)- intersections(1,i+1)
               y = intersections(2,i+2) - intersections(2,i+1)
             if (order .eq. 2) then
-              q1 = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*dist_to_ecen_up(1,1,i+1)&
-                 ! + gradQ2(:,2,i_0,j_0+1)*dist_to_ecen_up(2,1,i+1)
+              q1 = qold2(:,i_0,j_0+1) + gradQ2(:,1,i_0,j_0+1)*dist_to_ecen_up(1,1,i+1)&
+                 + gradQ2(:,2,i_0,j_0+1)*dist_to_ecen_up(2,1,i+1)
               aux_up = auxu(1,i_0,j_0+1)
-              q1l = qold(:,i_0,j_0+1)! + gradQ(:,1,i_0,j_0+1)*dist_to_ecen_down(1,1,i+1)&
-                ! + gradQ(:,2,i_0,j_0+1) * dist_to_ecen_down(2,1,i+1)
+              q1l = qold(:,i_0,j_0+1) + gradQ(:,1,i_0,j_0+1)*dist_to_ecen_down(1,1,i+1)&
+                + gradQ(:,2,i_0,j_0+1) * dist_to_ecen_down(2,1,i+1)
               aux_un = aux(1,i_0,j_0+1)
             else
               q1 = qold2(:,i_0,j_0+1)
@@ -125,51 +121,39 @@ contains
 
               ! left edge of merging neighbor cell:
             if (order .eq. 2) then
-              q1 = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*dist_to_ecen_up(1,2,i+1) &
-                ! + gradQ2(:,2,i_0,j_0+1)*dist_to_ecen_up(2,2,i+1)   ! at the barrier center
-             aux_up = auxu(1,i_0,j_0+1)
-             temp_dist = ecen_up_x(:,1,i+1)-cen_grid_up(:,i_0-1,j_0+1)
-             q1l = qold2(:,i_0-1,j_0+1) !+ gradQ2(:,1,i_0-1,j_0+1)*temp_dist(1) &
-              ! + gradQ2(:,2,i_0-1,j_0+1)*temp_dist(2)
-              call riemann_solver(q1l,q1,auxu(1,i_0-1,j_0+1),aux_up,s,fwave,&
-                  amdq,apdq,1)
+              call riemann_solver(qold2(:,i_0-2:i_0,j_0+1),qold2(:,i_0-1:i_0+1,j_0+1),&
+               auxu(1,i_0-2:i_0,j_0+1),auxu(1,i_0-1:i_0+1,j_0+1),s,fwave,&
+                  amdq,apdq,1,2,dt/dx,mthlim(3))
+              apdq_c = apdq(:,2)
             else
-              apdq = fp2(:,i_0,j_0+1)
+              apdq_c = fp2(:,i_0,j_0+1)
             end if
             cm_avg2 = cm_avg2 - dt/dx * (1/(area_supper(i)+&
-                up_area_ij(i_0,j_0+1)))* apdq
+                up_area_ij(i_0,j_0+1)))* apdq_c
 
              ! upper edge of merging neighbor cell:
            if (order .eq. 2) then
-             q1 = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*dist_to_ecen_up(1,3,i+1) &
-               ! + gradQ2(:,2,i_0,j_0+1)*dist_to_ecen_up(2,3,i+1)   !
-            aux_up = auxu(1,i_0,j_0+1)
-            temp_dist = ecen_up_y(:,2,i+1)-cen_grid_up(:,i_0,j_0+2)
-            q1l = qold2(:,i_0,j_0+2) !+ gradQ2(:,1,i_0,j_0+2)*temp_dist(1) &
-             ! + gradQ2(:,2,i_0,j_0+2)*temp_dist(2)
-             call riemann_solver(q1,q1l,aux_up,auxu(1,i_0,j_0+2),s,fwave,&
-               amdq,apdq,2)
+             call riemann_solver(qold2(:,i_0,j_0:j_0+2),qold2(:,i_0,j_0+1:j_0+3),&
+               auxu(1,i_0,j_0:j_0+2),auxu(1,i_0,j_0+1:j_0+3),s,fwave,&
+               amdq,apdq,2,2,dt/dx,mthlim)
+               amdq_c = amdq(:,2)
             else
-              amdq = gm2(:,i_0,j_0+2)
+              amdq_c = gm2(:,i_0,j_0+2)
             end if
            cm_avg2 = cm_avg2 - dt/dx * (1/(area_supper(i)+&
-               up_area_ij(i_0,j_0+1)))* amdq
+               up_area_ij(i_0,j_0+1)))* amdq_c
 
              ! right edge of merging neighbor cell:
            if (order .eq. 2) then
-            q1l = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*dist_to_ecen_up(1,4,i+1) &
-              ! + gradQ2(:,2,i_0,j_0+1)*dist_to_ecen_up(2,4,i+1)
-            aux_up = auxu(1,i_0,j_0+1)
-            temp_dist = ecen_up_x(:,2,i+1)-cen_grid_up(:,i_0+1,j_0+1)
-            q1 = qold2(:,i_0+1,j_0+1)!+gradQ2(:,1,i_0+1,j_0+1)*temp_dist(1) &
-               ! +gradQ2(:,2,i_0+1,j_0+1) * temp_dist(2)
-              call riemann_solver(q1l,q1,aux_up,auxu(1,i_0+1,j_0+1),s,fwave,&
-                amdq,apdq,1)
+              call riemann_solver(qold2(:,i_0-1:i_0+1,j_0+1),qold2(:,i_0:i_0+2,j_0+2),&
+              auxu(1,i_0-1:i_0+1,j_0+1),auxu(1,i_0:i_0+2,j_0+1),s,fwave,&
+                amdq,apdq,1,2,dt/dx,mthlim)
+              amdq_c = amdq(:,2)
             else
-              amdq = fm2(:,i_0+1,j_0+1)
+              amdq_c = fm2(:,i_0+1,j_0+1)
             end if
             cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(2,i+1))* (1/(area_supper(i)+&
-                up_area_ij(i_0,j_0+1)))* amdq
+                up_area_ij(i_0,j_0+1)))* amdq_c
 
             ! update the corresponding affected cells:
             qnew2(:,i_0,j_0) =cm_avg2!(area_supper(i))/(area_supper(i)+area_supper(i+1))*cm_avg2
@@ -184,10 +168,10 @@ contains
             aux_un = aux(1,i_0,j_0)
             aux_up = auxu(1,i_0,j_0)
             if (order .eq. 2) then
-              q1l = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i)&
-                 ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)
-              q1 = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i)&
-                 ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
+              q1l = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i)&
+                 + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)
+              q1 = qold(:,i_0,j_0) + gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i)&
+                 + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
             else
               q1l = qold2(:,i_0,j_0)
               q1 = qold(:,i_0,j_0)
@@ -197,50 +181,37 @@ contains
 
           ! the left edge
           if (order .eq. 2) then
-           aux_up = auxu(1,i_0,j_0)
-           aux_un = auxu(1,i_0-1,j_0)
-           q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,2,i) &
-            ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,2,i)
-           temp_dist = ecen_up_x(:,1,i) - cen_grid_up(:,i_0-1,j_0)
-           q1l = qold2(:,i_0-1,j_0)! +gradQ2(:,1,i_0-1,j_0)*temp_dist(1) &
-              ! + gradQ2(:,2,i_0-1,j_0)*temp_dist(2)
-           call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,&
-            amdq_l,apdq_l,1)
-            ! the right edge
-            aux_un = auxu(1,i_0+1,j_0)
-            q1l = qold2(:,i_0,j_0)!+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,4,i)&
-                ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,4,i)
-            temp_dist = ecen_up_x(:,2,i) - cen_grid_up(:,i_0+1,j_0)
-            q1 = qold2(:,i_0+1,j_0) !+ gradQ2(:,1,i_0+1,j_0)*temp_dist(1)&
-               ! +gradQ2(:,2,i_0+1,j_0)*temp_dist(2)
-            call riemann_solver(q1l,q1,aux_up,aux_un,s,fwave, &
-               amdq_r,apdq_r,1)
+           call riemann_solver(qold2(:,i_0-2:i_0,j_0),qold2(:,i_0-1:i_0+1,j_0),&
+             auxu(1,i_0-2:i_0,j_0),auxu(1,i_0-1:i_0+1,j_0),s,fwave,&
+            amdq_l,apdq_l,1,2,dt/dx,mthlim)
+            apdq_c = apdq_l(:,2)
+          ! the right edge
+            call riemann_solver(qold2(:,i_0-1:i_0+1,j_0),qold2(:,i_0:i_0+2,j_0),&
+              auxu(1,i_0-1:i_0+1,j_0),auxu(1,i_0:i_0+2,j_0),s,fwave, &
+               amdq_r,apdq_r,1,2,dt/dx,mthlim)
+               amdq_c = amdq_r(:,2)
             else
-              amdq_r = fm2(:,i_0+1,j_0)
-              apdq_l = fp2(:,i_0,j_0)
+              amdq_c = fm2(:,i_0+1,j_0)
+              apdq_c = fp2(:,i_0,j_0)
             end if
             if (area_supper(i)>0.5d0) then
               cm_avg2 = qold2(:,i_0,j_0)
 
                cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(2,i)) * &
-                 (1/area_supper(i)) * amdq_r
+                 (1/area_supper(i)) * amdq_c
 
               cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(4,i)) * &
-                 (1/area_supper(i)) * apdq_l
+                 (1/area_supper(i)) * apdq_c
             ! the upper edge
                 if (order .eq. 2) then
-                  aux_un = auxu(1,i_0,j_0+1)
-                  temp_dist = ecen_up_y(:,2,i) - cen_grid_up(:,i_0,j_0+1)
-                  q1l = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*temp_dist(1) &
-                      ! + gradQ2(:,2,i_0,j_0+1)*temp_dist(2)
-                  q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)* &
-                    ! dist_to_ecen_up(1,3,i) + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,3,i)
-                  call riemann_solver(q1,q1l,aux_up,aux_un,s,fwave,&
-                    amdq,apdq,2)
+                  call riemann_solver(qold2(:,i_0,j_0-1:j_0+1),qold2(:,i_0,j_0:j_0+2),&
+                    auxu(:,i_0,j_0-1:j_0+1),auxu(:,i_0,j_0:j_0+2),s,fwave,&
+                    amdq,apdq,2,2,dt/dx,mthlim)
+                    amdq_c = amdq(:,2)
                 else
-                    amdq = gm2(:,i_0,j_0+1)
+                    amdq_c = gm2(:,i_0,j_0+1)
                 end if
-              cm_avg2 = cm_avg2 - dt/dx * (1/area_supper(i))*amdq
+              cm_avg2 = cm_avg2 - dt/dx * (1/area_supper(i))*amdq_c
             ! the barrier edge
              cm_avg2 = cm_avg2 - dt/dx *lengths_supper(1,i)*(1/(area_supper(i)))&
                     *amdq_wall
@@ -255,46 +226,40 @@ contains
                       *amdq_wall
               ! left edge:
               cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(2,i)) * &
-                (1/( 1+ area_supper(i)) ) * amdq_r
+                (1/( 1+ area_supper(i)) ) * amdq_c
               ! right edge:
                cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(4,i)) * &
-                  (1/( 1+ area_supper(i)) ) * apdq_l
+                  (1/( 1+ area_supper(i)) ) * apdq_c
               ! upper left edge:
               if (order .eq. 2) then
-                q1l = qold2(:,i_0-1,j_0+1) !+ gradQ2(:,1,i_0-1,j_0+1)*dx/2.d0
-                q1 = qold2(:,i_0,j_0+1) !-  gradQ2(:,1,i_0,j_0+1)*dx/2.d0
-                aux_un = auxu(1,i_0-1,j_0+1)
-                aux_up = auxu(1,i_0,j_0+1)
-                call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,amdq,apdq,1)
+                call riemann_solver(qold2(:,i_0-2:i_0,j_0+1),qold2(:,i_0-1:i_0+1,j_0+1),&
+                  auxu(1,i_0-2:i_0,j_0+1),auxu(1,i_0-1:i_0+1,j_0+1),s,fwave,amdq,apdq,1,&
+                   2, dt/dx,mthlim)
+                apdq_c =apdq(:,2)
               else
-                apdq = fp2(:,i_0,j_0+1)
+                apdq_c = fp2(:,i_0,j_0+1)
               end if
-              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_supper(i)) )*apdq
+              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_supper(i)) )*apdq_c
               ! upper upper edge:
               if (order .eq. 2) then
-                q1l = qold2(:,i_0,j_0+2) !- gradQ2(:,2,i_0,j_0+2)*dy/2.d0
-                q1 = qold2(:,i_0,j_0+1) !+ gradQ2(:,2,i_0,j_0+1)*dy/2.d0
-                aux_un = auxu(1,i_0,j_0+2)
-                aux_up = auxu(1,i_0,j_0+1)
-                call riemann_solver(q1,q1l,aux_up,aux_un,s,fwave,amdq,apdq,2)
+                call riemann_solver(qold2(:,i_0,j_0:j_0+2),qold2(:,i_0,j_0+1:j_0+3),&
+                  auxu(1,i_0,j_0:j_0+2),auxu(1,i_0,j_0+1:j_0+3),s,fwave,amdq,apdq,2,&
+                  2,dt/dx,mthlim)
+                amdq_c =amdq(:,2)
               else
-                  amdq = gm2(:,i_0,j_0+2)
+                  amdq_c = gm2(:,i_0,j_0+2)
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*amdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*amdq_c
               !upper right edge :
               if (order .eq. 2) then
-                q1l = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*dx/2.d0
-                temp_dist = (/ecen_up_x(1,2,i),cen_grid_up(2,i_0,j_0+1)/) &
-                     - cen_grid_up(:,i_0+1,j_0+1)
-                q1 = qold2(:,i_0+1,j_0+1) !+ gradQ2(:,1,i_0+1,j_0+1)*temp_dist(1)&
-                    ! + gradQ2(:,2,i_0+1,j_0+1)*temp_dist(2)
-                aux_un = auxu(1,i_0,j_0+1)
-                aux_up = auxu(1,i_0+1,j_0+1)
-                call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,amdq,apdq,1)
+                call riemann_solver(qold2(:,i_0-1:i_0+1,j_0+1),qold2(:,i_0:i_0+2,j_0+1),&
+                  auxu(:,i_0-1:i_0+1,j_0+1),auxu(1,i_0:i_0+2,j_0+1),s,fwave,amdq,apdq,1,&
+                  2, dt/dx,mthlim)
+                amdq_c = amdq(:,2)
               else
-                  amdq = fm2(:,i_0+1,j_0+1)
+                  amdq_c = fm2(:,i_0+1,j_0+1)
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*amdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*amdq_c
 
               ! update the corresponding affected cells:
               qnew2(:,i_0,j_0) =cm_avg2!(area_supper(i))/(area_supper(i)+1)*cm_avg2
@@ -312,10 +277,10 @@ contains
               ! get the cell edge value via gradient:
               ! barrier edge at indexed small cell
               if (order.eq.2) then
-               q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
-                 ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
-               q1l = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
-                 ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
+               q1 = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
+                 + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
+               q1l = qold(:,i_0,j_0)+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
+                 + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
              else
                q1 = qold2(:,i_0,j_0)
                q1l = qold(:,i_0,j_0)
@@ -327,20 +292,16 @@ contains
 
               ! at the right:
               if (order .eq. 2) then
-                q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,4,i) &
-                  ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,4,i)   ! at the barrier center
-               aux_up = auxu(1,i_0,j_0)
-               temp_dist = ecen_up_x(:,2,i)-cen_grid_up(:,i_0+1,j_0)
-               q1l = qold2(:,i_0+1,j_0) !+ gradQ2(:,1,i_0+1,j_0)*temp_dist(1) &
-                ! + gradQ2(:,2,i_0+1,j_0)*temp_dist(2)
-                call riemann_solver(q1,q1l,aux_up,auxu(1,i_0+1,j_0),s,fwave,&
-                    amdq,apdq,1)
+                call riemann_solver(qold2(:,i_0-1:i_0+1,j_0),qold2(:,i_0:i_0+2,j_0),&
+                  auxu(1,i_0-1:i_0+1,j_0),auxu(1,i_0:i_0+2,j_0),s,fwave,&
+                  amdq,apdq,1,2,dt/dx,mthlim)
+                amdq_c = amdq(:,2)
               else
-                  amdq = fm2(:,i_0+1,j_0)
+                  amdq_c = fm2(:,i_0+1,j_0)
               end if
 
               cm_avg2 = cm_avg2 - dt/dx *(1/(area_supper(i)+&
-                  up_area_ij(i_0,j_0-1)))* amdq
+                  up_area_ij(i_0,j_0-1)))* amdq_c
 
               ! at the merging neighbor cell edges:
               ! at the barrier edge and moving clockwise
@@ -349,10 +310,10 @@ contains
               x = intersections(1,i+2)- intersections(1,i+1)
               y = intersections(2,i+2) - intersections(2,i+1)
               if (order .eq. 2) then
-                q1 = qold2(:,i_0,j_0-1) !+ gradQ2(:,1,i_0,j_0-1)*dist_to_ecen_up(1,1,i+1)&
-                   ! + gradQ2(:,2,i_0,j_0-1)*dist_to_ecen_up(2,1,i+1)
-                q1l = qold(:,i_0,j_0-1) !+ gradQ(:,1,i_0,j_0-1)*dist_to_ecen_down(1,1,i+1)&
-                  ! + gradQ(:,2,i_0,j_0-1) * dist_to_ecen_down(2,1,i+1)
+                q1 = qold2(:,i_0,j_0-1) + gradQ2(:,1,i_0,j_0-1)*dist_to_ecen_up(1,1,i+1)&
+                   + gradQ2(:,2,i_0,j_0-1)*dist_to_ecen_up(2,1,i+1)
+                q1l = qold(:,i_0,j_0-1) + gradQ(:,1,i_0,j_0-1)*dist_to_ecen_down(1,1,i+1)&
+                  + gradQ(:,2,i_0,j_0-1) * dist_to_ecen_down(2,1,i+1)
               else
                   q1l = qold2(:,i_0,j_0-1)
                   q1 = qold(:,i_0,j_0-1)
@@ -364,58 +325,46 @@ contains
 
               ! left edge of merging neighbor cell:
               if (order .eq. 2 ) then
-                q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,2,i) &
-                  ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,2,i)   ! at the barrier center
-               aux_up = auxu(1,i_0,j_0)
-               temp_dist = ecen_up_x(:,1,i)-cen_grid_up(:,i_0-1,j_0)
-               q1l = qold2(:,i_0-1,j_0) !+ gradQ2(:,1,i_0-1,j_0)*temp_dist(1) &
-                ! + gradQ2(:,2,i_0-1,j_0)*temp_dist(2)
-                call riemann_solver(q1l,q1,auxu(1,i_0-1,j_0),aux_up,s,fwave,&
-                    amdq,apdq,1)
+                call riemann_solver(qold2(:,i_0-2:i_0,j_0),qold2(:,i_0-1:i_0+1,j_0),&
+                  auxu(1,i_0-2:i_0,j_0),auxu(1,i_0-1:i_0+1,j_0),s,fwave,&
+                    amdq,apdq,1,2,dt/dx,mthlim)
+                apdq_c = apdq(:,2)
               else
-                apdq = fp2(:,i_0,j_0)
+                apdq_c = fp2(:,i_0,j_0)
               end if
               cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(5,i))* (1/(area_supper(i)+&
-                  up_area_ij(i_0,j_0-1)))* apdq
+                  up_area_ij(i_0,j_0-1)))* apdq_c
 
              ! upper edge of merging neighbor cell:
              if (order .eq. 2) then
-               q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,3,i) &
-                 ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,3,i)   !
-              aux_up = auxu(1,i_0,j_0)
-              temp_dist = ecen_up_y(:,2,i)-cen_grid_up(:,i_0,j_0+1)
-              q1l = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*temp_dist(1) &
-               ! + gradQ2(:,2,i_0,j_0+1)*temp_dist(2)
-               call riemann_solver(q1,q1l,aux_up,auxu(1,i_0,j_0+2),s,fwave,&
-                 amdq,apdq,2)
+               call riemann_solver(qold2(:,i_0,j_0-1:j_0+1),qold2(:,i_0,j_0:j_0+2),&
+                 auxu(1,i_0,j_0-1:j_0+1),auxu(1,i_0,j_0:j_0+2),s,fwave,&
+                 amdq,apdq,2,2,dt/dx,mthlim)
+              amdq_c = amdq(:,2)
              else
-               amdq = gm2(:,i_0,j_0+1)
+               amdq_c = gm2(:,i_0,j_0+1)
              end if
              cm_avg2 = cm_avg2 - dt/dx * (1/(area_supper(i)+&
-               up_area_ij(i_0,j_0-1)))* amdq
+               up_area_ij(i_0,j_0-1)))* amdq_c
 
              ! right edge of merging neighbor cell:
              if (order .eq. 2) then
-              q1l = qold2(:,i_0,j_0-1) !+ gradQ2(:,1,i_0,j_0-1)*dist_to_ecen_up(1,2,i+1) &
-                ! + gradQ2(:,2,i_0,j_0-1)*dist_to_ecen_up(2,2,i+1)
-              aux_up = auxu(1,i_0,j_0-1)
-              temp_dist = ecen_up_x(:,2,i+1)-cen_grid_up(:,i_0+1,j_0-1)
-              q1 = qold2(:,i_0+1,j_0-1)!+gradQ2(:,1,i_0+1,j_0-1)*temp_dist(1) &
-                 ! +gradQ2(:,2,i_0+1,j_0-1) * temp_dist(2)
-              call riemann_solver(q1l,q1,aux_up,auxu(1,i_0+1,j_0+1),s,fwave,&
-                amdq,apdq,1)
+              call riemann_solver(qold2(:,i_0-1:i_0+1,j_0-1),qold2(:,i_0:i_0+2,j_0-1),&
+                auxu(1,i_0-1:i_0+1,j_0-1),auxu(1,i_0:i_0+2,j_0-1),s,fwave,&
+                amdq,apdq,1,2,dt/dx,mthlim)
+              amdq_c = amdq(:,2)
             else
-              amdq = fm2(:,i_0+1,j_0-1)
+              amdq_c = fm2(:,i_0+1,j_0-1)
             end if
             cm_avg2 = cm_avg2 - dt/dx * lengths_supper(2,i+1)*(1/(area_supper(i)+&
-                up_area_ij(i_0,j_0-1)))* amdq
+                up_area_ij(i_0,j_0-1)))* amdq_c
 
             ! update the corresponding affected cells:
             qnew2(:,i_0,j_0) = cm_avg2!(area_supper(i))/(area_supper(i)+area_supper(i-1))*cm_avg2
             qnew2(:,i_0,j_0-1)= cm_avg2!(area_supper(i-1)/(area_supper(i)+area_supper(i-1)))*cm_avg2
 
           case(2,7)
-            ! similar to case(3,6) but just merge with i_0+/-1,j_0
+            similar to case(3,6) but just merge with i_0+/-1,j_0
             if (type_supper(i).eq.2) then
               ixy = 2
               is = 1
@@ -449,59 +398,51 @@ contains
                 x,y,amdq_wall,apdq_wall,ixy,wall_height)
                 ! the bottom edge
             if (order .eq. 2) then
-                 aux_up = auxu(1,i_0,j_0)
-                 aux_un = auxu(1,i_0,j_0-1)
-                 q1 = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,2,i) &
-                  + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,2,i)
-                 temp_dist = ecen_up_y(:,1,i) - cen_grid_up(:,i_0,j_0-1)
-                 q1l = qold2(:,i_0,j_0-1) +gradQ2(:,1,i_0,j_0-1)*temp_dist(1) &
-                    + gradQ2(:,2,i_0,j_0-1)*temp_dist(2)
-                 call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,&
-                  amdq_l,apdq_l,2)
+                 call riemann_solver(qold2(:,i_0,j_0-2:j_0),qold2(:,i_0,j_0-1:j_0+1),&
+                   auxu(1,i_0,j_0-2:j_0),auxu(1,i_0,j_0-1:j_0+1),s,fwave,&
+                  amdq_l,apdq_l,2,2,dt/dx,mthlim)
+                  apdq_c = apdq_l(:,2)
             else
-                  apdq_l = gp2(:,i_0,j_0)
+                  apdq_c = gp2(:,i_0,j_0)
             end if
                   ! the top edge
             if (order .eq. 2) then
-                  aux_un = auxu(1,i_0,j_0+1)
-                  aux_up = auxu(1,i_0,j_0)
-                  q1l = qold2(:,i_0,j_0)+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,4,i)&
-                      + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,4,i)
-                  temp_dist = ecen_up_y(:,2,i) - cen_grid_up(:,i_0,j_0+1)
-                  q1 = qold2(:,i_0,j_0+1) + gradQ2(:,1,i_0,j_0+1)*temp_dist(1)&
-                     +gradQ2(:,2,i_0,j_0+1)*temp_dist(2)
-                  call riemann_solver(q1l,q1,aux_up,aux_un,s,fwave, &
-                     amdq_r,apdq_r,2)
+                  call riemann_solver(qold2(:,i_0,j_0-1:j_0+1),qold2(:,i_0,j_0:j_0+2),&
+                    auxu(1,i_0,j_0-1:j_0+1),auxu(1,i_0,j_0:j_0+2),s,fwave, &
+                     amdq_r,apdq_r,2,2,dt/dx,mthlim)
+                     amdq_c = amdq_r(:,2)
             else
-                  amdq_r = gm2(:,i_0,j_0+1)
+                  amdq_c = gm2(:,i_0,j_0+1)
             end if
             if (area_supper(i)>0.5d0) then
                 cm_avg2 = qold2(:,i_0,j_0)
 
                  cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(ibot,i)) * &
-                   (1/area_supper(i)) * apdq_l
+                   (1/area_supper(i)) * apdq_c
 
                 cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(itop,i)) * &
-                   (1/area_supper(i)) * amdq_r
+                   (1/area_supper(i)) * amdq_c
             ! the lateral edge
                 if (order .eq. 2) then
-                  aux_un = auxu(1,ilat,j_0)
-                  temp_dist = ecen_up_x(:,ilat2,i) - cen_grid_up(:,ilat,j_0)
-                  q1l = qold2(:,ilat,j_0) + gradQ2(:,1,ilat,j_0)*temp_dist(1) &
-                      + gradQ2(:,2,ilat,j_0)*temp_dist(2)
-                  q1 = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)* &
-                    dist_to_ecen_up(1,ibot-1,i) + &
-                       gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,ibot-1,i)
-                  call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,&
-                    amdq,apdq,2)
+                  if(type_supper(i) .eq. 2) then
+                    call riemann_solver(qold2(:,ilat-1:i_0,j_0),qold2(:,ilat:i_0+1,j_0),&
+                       auxu(1,ilat-1:i_0,j_0),auxu(1,ilat:i_0+1,j_0),s,fwave,&
+                      amdq,apdq,1,2,dt/dx,mthlim )
+                    apdq_c = apdq(:,2)
+                  else
+                    call riemann_solver(qold2(:,i_0-1:ilat,j_0),qold2(:,i_0:ilat+1,j_0),&
+                       auxu(1,i0-1:ilat,j_0),auxu(1,i_0:ilat+1,j_0),s,fwave,&
+                      amdq,apdq,1,2,dt/dx,mthlim )
+                    apdq_c = amdq(:,2)
+                  end if
                 else
                     if (type_supper(i) .eq. 2) then
-                      apdq = fp2(:,i_0,j_0)
+                      apdq_c = fp2(:,i_0,j_0)
                     else
-                      apdq = fm2(:,i_0+1,j_0)
+                      apdq_c = fm2(:,i_0+1,j_0)
                     end if
                 end if
-              cm_avg2 = cm_avg2 - dt/dx * (1/area_supper(i))*apdq
+              cm_avg2 = cm_avg2 - dt/dx * (1/area_supper(i))*apdq_c
             ! the barrier edge
                cm_avg2 = cm_avg2 - dt/dx *lengths_supper(1,i)*(1/(area_supper(i)))&
                       *amdq_wall
@@ -516,51 +457,52 @@ contains
                       *amdq_wall
               ! bottom edge:
               cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(ibot,i)) * &
-                (1/( 1+ area_supper(i)) ) * amdq_l
+                (1/( 1+ area_supper(i)) ) * amdq_c
               ! top edge:
                cm_avg2 = cm_avg2 - dt/dx * (lengths_supper(itop,i)) * &
-                  (1/( 1+ area_supper(i)) ) * apdq_r
+                  (1/( 1+ area_supper(i)) ) * apdq_c
               ! lateral top edge:
               if (order .eq. 2) then
-                q1l = qold2(:,ilat,j_0+1) - gradQ2(:,2,ilat,j_0+1)*dy/2.d0
-                q1 = qold2(:,ilat,j_0) +  gradQ2(:,2,ilat,j_0)*dy/2.d0
-                aux_un = auxu(1,ilat,j_0)
-                aux_up = auxu(1,ilat,j_0+1)
-                call riemann_solver(q1,q1l,aux_un,aux_up,s,fwave,amdq,apdq,2)
+                call riemann_solver(qold2(:,ilat,j_0-1:j_0+1),qold2(:,ilat,j_0:j_0+2),&
+                  auxu(1,ilat,j_0-1:j_0+1),auxu(1,ilat,j_0:j_0+2),s,fwave,amdq,apdq,2,&
+                  2,dt/dx,mthlim)
+                  amdq_c =amdq(:,2)
               else
-                amdq = gm2(:,ilat,j_0+1)
+                amdq_c = gm2(:,ilat,j_0+1)
               end if
-              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_supper(i)) )*amdq
+              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_supper(i)) )*amdq_c
 
               ! lateral lateral edge:
               if (order .eq. 2) then
-                q1l = qold2(:,ilat3,j_0) + is* gradQ2(:,1,ilat3,j_0)*dx/2.d0
-                q1 = qold2(:,ilat,j_0) - is* gradQ2(:,1,ilat,j_0)*dx/2.d0
-                aux_un = auxu(1,ilat,j_0)
-                aux_up = auxu(1,ilat3,j_0)
-                call riemann_solver(q1l,q1,aux_up,aux_un,s,fwave,amdq,apdq,2)
+                if (type_supper(i) .eq. 2) then
+                  call riemann_solver(qold2(:,ilat3-1:ilat,j_0),qold2(:,ilat3:ilat+1,j_0),&
+                    auxu(1,ilat3-1:ilat,j_0),auxu(1,ilat3:ilat+1,j_0),s,fwave,amdq,apdq,1,&
+                    2,dt/dx,mthlim)
+                  apdq_c = apdq(:,2)
+                else
+                  call riemann_solver(qold2(:,ilat-1:ilat3,j_0),qold2(:,ilat:ilat3+1,j_0),&
+                    auxu(1,ilat-1:ilat3,j_0),auxu(1,ilat:ilat3+1,j_0),s,fwave,amdq,apdq,1,&
+                    2,dt/dx,mthlim)
+                  apdq_c = amdq(:,2)
+                end if
               else
                 if (type_supper(i) .eq. 2) then
-                  apdq = fp2(:,ilat,j_0)
+                  apdq_c = fp2(:,ilat,j_0)
                 else
-                  apdq = fm2(:,ilat3,j_0)
+                  apdq_c = fm2(:,ilat3,j_0)
                 end if
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*apdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*apdq_c
               !lateral bottom edge :
               if (order .eq. 2) then
-                q1l = qold2(:,ilat,j_0) - gradQ2(:,2,ilat,j_0)*dy/2.d0
-                temp_dist = (/cen_grid_up(1,ilat,j_0),cen_grid_up(2,ilat,j_0)-dy/2.d0/) &
-                     - cen_grid_up(:,ilat,j_0-1)
-                q1 = qold2(:,ilat,j_0-1) + gradQ2(:,1,ilat,j_0-1)*temp_dist(1)&
-                    + gradQ2(:,2,ilat,j_0-1)*temp_dist(2)
-                aux_un = auxu(1,ilat,j_0)
-                aux_up = auxu(1,ilat,j_0-1)
-                call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,amdq,apdq,1)
+                call riemann_solver(qold2(:,ilat,j_0-2:j_0),qold2(:,ilat,j_0-1:j_0+1),&
+                  auxu(1,ilat,j_0-2:j_0),auxu(1,ilat,j_0-1:j_0+1),s,fwave,amdq,apdq,2,2,&
+                  dt/dx,mthlim)
+                apdq_c = apdq(:,2)
               else
-                amdq = gp2(:,ilat,j_0)
+                apdq_c = gp2(:,ilat,j_0)
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*amdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_supper(i)))*apdq_c
 
               ! update the corresponding affected cells:
               qnew2(:,i_0,j_0) =  cm_avg2!(area_supper(i))/(area_supper(i)+1)*cm_avg2
@@ -583,10 +525,10 @@ contains
               ! get the cell edge value via gradient:
               ! barrier edge at indexed small cell
             if (order.eq. 2) then
-               q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
-                 ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
-               q1l = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
-                 ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
+               q1 = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
+                 + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
+               q1l = qold(:,i_0,j_0) + gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
+                 + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
             else
                 q1 =qold2(:,i_0,j_0)
                 q1l =qold(:,i_0,j_0)
@@ -598,19 +540,15 @@ contains
 
               ! at the edge 2:
               if (order .eq. 2) then
-                q1 = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,2,i) &
-                  ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,2,i)   ! at the barrier center
-               aux_up = aux(1,i_0,j_0)
-               temp_dist = ecen_un_x(:,1,i)-cen_grid_down(:,i_0+1,j_0)
-               q1l = qold(:,i_0+1,j_0)! + gradQ(:,1,i_0+1,j_0)*temp_dist(1) &
-                ! + gradQ(:,2,i_0+1,j_0)*temp_dist(2)
-                call riemann_solver(q1,q1l,aux_up,aux(1,i_0+1,j_0),s,fwave,&
-                    amdq,apdq,1)
+                call riemann_solver(qold(:,i_0-1:i_0+1,j_0),qold(:,i_0:i_0+2,j_0),&
+                  auxu(1,i_0-1:i_0+1,j_0),aux(1,i_0:i_0+2,j_0),s,fwave,&
+                    amdq,apdq,1,2,dt/dx,mthlim)
+                amdq_c = amdq(:,2)
               else
-                amdq = fm(:,i_0+1,j_0)
+                amdq_c = fm(:,i_0+1,j_0)
               end if
               cm_avg2 = cm_avg2 - dt/dx * lengths_sunder(2,i)*(1/(area_sunder(i)+&
-                  un_area_ij(i_0,j_0-1)))* amdq
+                  un_area_ij(i_0,j_0-1)))* amdq_c
 
               ! at the merging neighbor cell edges:
               ! at the barrier edge and moving clockwise
@@ -619,10 +557,10 @@ contains
               x = intersections(1,i)- intersections(1,i-1)
               y = intersections(2,i) - intersections(2,i-1)
               if (order .eq. 2) then
-                q1 = qold2(:,i_0,j_0-1) !+ gradQ2(:,1,i_0,j_0-1)*dist_to_ecen_up(1,1,i-1)&
-                   ! + gradQ2(:,2,i_0,j_0-1)*dist_to_ecen_up(2,1,i-1)
-                q1l = qold(:,i_0,j_0-1) !+ gradQ(:,1,i_0,j_0-1)*dist_to_ecen_down(1,1,i-1)&
-                  ! + gradQ(:,2,i_0,j_0-1) * dist_to_ecen_down(2,1,i-1)
+                q1 = qold2(:,i_0,j_0-1) + gradQ2(:,1,i_0,j_0-1)*dist_to_ecen_up(1,1,i-1)&
+                   + gradQ2(:,2,i_0,j_0-1)*dist_to_ecen_up(2,1,i-1)
+                q1l = qold(:,i_0,j_0-1) + gradQ(:,1,i_0,j_0-1)*dist_to_ecen_down(1,1,i-1)&
+                  + gradQ(:,2,i_0,j_0-1) * dist_to_ecen_down(2,1,i-1)
               else
                 q1 = qold2(:,i_0,j_0-1)
                 q1l = qold(:,i_0,j_0-1)
@@ -634,51 +572,39 @@ contains
 
               ! left edge of merging neighbor cell:
               if (order .eq. 2) then
-                q1 = qold(:,i_0,j_0-1)! + gradQ(:,1,i_0,j_0-1)*dist_to_ecen_down(1,4,i-1) &
-                  ! + gradQ(:,2,i_0,j_0-1)*dist_to_ecen_down(2,4,i-1)   ! at the barrier center
-               aux_up = aux(1,i_0,j_0-1)
-               temp_dist = ecen_un_x(:,1,i-1)-cen_grid_down(:,i_0-1,j_0-1)
-               q1l = qold(:,i_0-1,j_0-1) !+ gradQ(:,1,i_0-1,j_0-1)*temp_dist(1) &
-                ! + gradQ2(:,2,i_0-1,j_0-1)*temp_dist(2)
-                call riemann_solver(q1l,q1,aux(1,i_0-1,j_0-1),aux_up,s,fwave,&
-                    amdq,apdq,1)
+                call riemann_solver(qold(:,i_0-2:i_0,j_0-1),qold(:,i_0-1:i_0+1,j_0-1),&
+                  aux(1,i_0-2:i_0,j_0-1),aux(1,i_0-1:i_0+1,j_0-1),s,fwave,&
+                    amdq,apdq,1,2,dt/dx,mthlim)
+                apdq_c =apdq(:,2)
               else
-                apdq = fp(:,i_0,j_0-1)
+                apdq_c = fp(:,i_0,j_0-1)
               end if
               cm_avg2 = cm_avg2 - dt/dx *lengths_sunder(5,i-1)*(1/(area_sunder(i)+&
-                  un_area_ij(i_0,j_0-1)))* apdq
+                  un_area_ij(i_0,j_0-1)))* apdq_c
 
              ! lower edge of merging neighbor cell:
              if (order .eq.  2) then
-               q1 = qold(:,i_0,j_0-1) !+ gradQ(:,1,i_0,j_0-1)*dist_to_ecen_down(1,3,i-1) &
-                 ! + gradQ(:,2,i_0,j_0-1)*dist_to_ecen_down(2,3,i-1)   !
-              aux_up = aux(1,i_0,j_0-1)
-              temp_dist = ecen_un_y(:,1,i-1)-cen_grid_down(:,i_0,j_0-2)
-              q1l = qold(:,i_0,j_0-2) !+ gradQ(:,1,i_0,j_0-2)*temp_dist(1) &
-               ! + gradQ(:,2,i_0,j_0-2)*temp_dist(2)
-               call riemann_solver(q1l,q1,aux(1,i_0,j_0-2),aux_up,s,fwave,&
-                 amdq,apdq,2)
+               call riemann_solver(qold(:,i_0,j_0-3:j_0-1),qold(:,i_0,j_0-2:j_0),&
+                 aux(1,i_0,j_0-3:j_0-1),aux(1,i_0,j_0-2:j_0),s,fwave,&
+                 amdq,apdq,2,2,dt/dx,mthlim)
+              apdq_c =apdq(:,2)
              else
-               apdq = gp(:,i_0,j_0-1)
+               apdq_c = gp(:,i_0,j_0-1)
              end if
            cm_avg2 = cm_avg2 - dt/dx * (1/(area_sunder(i)+&
-               un_area_ij(i_0,j_0-1)))* apdq
+               un_area_ij(i_0,j_0-1)))* apdq_c
 
              ! right edge of merging neighbor cell:
              if (order .eq. 2) then
-              q1l = qold(:,i_0,j_0-1) !+ gradQ(:,1,i_0,j_0-1)*dist_to_ecen_down(1,2,i-1) &
-                ! + gradQ(:,2,i_0,j_0-1)*dist_to_ecen_down(2,2,i-1)
-              aux_up = aux(1,i_0,j_0-1)
-              temp_dist = ecen_un_x(:,2,i-1)-cen_grid_down(:,i_0+1,j_0-1)
-              q1 = qold(:,i_0+1,j_0-1)!+gradQ(:,1,i_0+1,j_0-1)*temp_dist(1) &
-                 ! +gradQ(:,2,i_0+1,j_0-1) * temp_dist(2)
-              call riemann_solver(q1l,q1,aux_up,aux(1,i_0+1,j_0-1),s,fwave,&
-                amdq,apdq,1)
+              call riemann_solver(qold(:,i_0-1:i_0+1,j_0-1),qold(:,i_0:i_0+2,j_0-1),&
+              aux(1,i_0-1:i_0+1,j_0-1),aux(1,i_0:i_0+2,j_0-1),s,fwave,&
+                amdq,apdq,1,2,dt/dx,mthlim )
+              amdq_c = amdq(:,2)
             else
-              amdq=fm(:,i_0+1,j_0-1)
+              amdq_c=fm(:,i_0+1,j_0-1)
             end if
               cm_avg2 = cm_avg2 - dt/dx * (1/(area_sunder(i)+&
-                  un_area_ij(i_0,j_0-1)))* amdq
+                  un_area_ij(i_0,j_0-1)))* amdq_c
 
             ! update the corresponding affected cells:
             qnew(:,i_0,j_0) = cm_avg2!(area_sunder(i))/(area_sunder(i)+area_sunder(i-1))*cm_avg2
@@ -693,10 +619,10 @@ contains
             aux_un = aux(1,i_0,j_0)
             aux_up = auxu(1,i_0,j_0)
             if (order .eq. 2) then
-              q1l = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i)&
-                 ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)
-              q1 = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i)&
-                 ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
+              q1l = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i)&
+                 + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)
+              q1 = qold(:,i_0,j_0) + gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i)&
+                 + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
             else
                 q1l = qold2(:,i_0,j_0)
                 q1 = qold(:,i_0,j_0)
@@ -705,55 +631,40 @@ contains
                   x,y,amdq_wall,apdq_wall,ixy,wall_height)
                 ! the left edge
               if (order .eq. 2) then
-                 aux_up = aux(1,i_0,j_0)
-                 aux_un = aux(1,i_0-1,j_0)
-                 q1 = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,4,i) &
-                  ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,4,i)
-                 temp_dist = ecen_un_x(:,1,i) - cen_grid_down(:,i_0-1,j_0)
-                 q1l = qold(:,i_0-1,j_0) !+gradQ(:,1,i_0-1,j_0)*temp_dist(1) &
-                    ! + gradQ(:,2,i_0-1,j_0)*temp_dist(2)
-                 call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,&
-                  amdq_l,apdq_l,1)
+                 call riemann_solver(qold(:,i_0-2:i_0,j_0),qold(:,i_0-1:i_0+1,j_0),&
+                   aux(1,i_0-2:i_0,j_0),aux(1,i_0-1:i_0+1,j_0),s,fwave,&
+                  amdq_l,apdq_l,1,2,dt/dx,mthlim)
+                  apdq_c = apdq_l(:,2)
               else
-                  apdq_l = fp(:,i_0,j_0)
+                  apdq_c = fp(:,i_0,j_0)
               end if
                   ! the right edge
               if (order .eq. 2) then
-                  aux_un = aux(1,i_0+1,j_0)
-                  q1l = qold(:,i_0,j_0)!+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,2,i)&
-                      ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,2,i)
-                  temp_dist = ecen_un_x(:,2,i) - cen_grid_down(:,i_0+1,j_0)
-                  q1 = qold(:,i_0+1,j_0) !+ gradQ(:,1,i_0+1,j_0)*temp_dist(1)&
-                     ! +gradQ(:,2,i_0+1,j_0)*temp_dist(2)
-                  call riemann_solver(q1l,q1,aux_up,aux_un,s,fwave, &
-                     amdq_r,apdq_r,1)
+                  call riemann_solver(qold(:,i_0-1:i_0+1,j_0),qold(:,i_0:i_0+2,j_0),&
+                     aux(:,i_0-1:i_0+1,j_0),aux(:,i_0:i_0+2,j_0),s,fwave, &
+                     amdq_r,apdq_r,1,2,dt/dx,mthlim)
+                  amdq_c = amdq_r(:,2)
               else
-                    amdq_r = fm(:,i_0+1,j_0)
+                    amdq_c = fm(:,i_0+1,j_0)
               end if
             if (area_sunder(i)>0.5d0) then
               cm_avg2 = qold(:,i_0,j_0)
 
                cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(2,i)) * &
-                 (1/area_sunder(i)) * amdq_r
+                 (1/area_sunder(i)) * amdq_c
 
               cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(4,i)) * &
-                 (1/area_sunder(i)) * apdq_l
+                 (1/area_sunder(i)) * apdq_c
             ! the lower edge
                 if (order .eq. 2) then
-                  aux_un = aux(1,i_0,j_0-1)
-                  aux_up = aux(1,i_0,j_0)
-                  temp_dist = ecen_un_y(:,1,i) - cen_grid_down(:,i_0,j_0-1)
-                  q1l = qold(:,i_0,j_0-1) !+ gradQ(:,1,i_0,j_0-1)*temp_dist(1) &
-                      ! + gradQ(:,2,i_0,j_0-1)*temp_dist(2)
-                  q1 = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)* &
-                   ! dist_to_ecen_down(1,3,i) + gradQ(:,2,i_0,j_0)&
-                      ! *dist_to_ecen_down(2,3,i)
-                  call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,&
-                    amdq,apdq,2)
+                  call riemann_solver(qold(:,i_0,j_0-2:j_0),qold(:,i_0,j_0-1:j_0+1),&
+                    aux(:,i_0,j_0-2:j_0),aux(:,i_0,j_0-1:j_0+1),s,fwave,&
+                    amdq,apdq,2,2,dt/dx,mthlim)
+                  apdq_c =apdq(:,2)
                 else
-                  apdq = gp(:,i_0,j_0)
+                  apdq_c = gp(:,i_0,j_0)
                 end if
-              cm_avg2 = cm_avg2 - dt/dx * (1/area_sunder(i))*apdq
+              cm_avg2 = cm_avg2 - dt/dx * (1/area_sunder(i))*apdq_c
             ! the barrier edge
                cm_avg2 = cm_avg2 - dt/dx *lengths_sunder(1,i)*(1/(area_sunder(i)))&
                       *apdq_wall
@@ -768,46 +679,40 @@ contains
                       *apdq_wall
               ! left edge:
               cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(2,i)) * &
-                (1/( 1+ area_sunder(i)) ) * amdq_r
+                (1/( 1+ area_sunder(i)) ) * amdq_c
               ! right edge:
                cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(4,i)) * &
-                  (1/( 1+ area_sunder(i)) ) * apdq_l
+                  (1/( 1+ area_sunder(i)) ) * apdq_c
               ! lower left edge:
               if (order .eq. 2) then
-                q1l = qold(:,i_0-1,j_0-1)! + gradQ(:,1,i_0-1,j_0-1)*dx/2.d0
-                q1 = qold(:,i_0,j_0-1)! -  gradQ(:,1,i_0,j_0-1)*dx/2.d0
-                aux_un = aux(1,i_0-1,j_0-1)
-                aux_up = aux(1,i_0,j_0-1)
-                call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,amdq,apdq,1)
+                call riemann_solver(qold(:,i_0-2:i_0,j_0-1),qold(:,i_0-1:i_0+1,j_0-1),&
+                  aux(1,i_0-2:i_0,j_0-1),aux(1,i_0-1:i_0+1,j_0-1),s,fwave,amdq,apdq,1,&
+                  2,dt/dx,mthlim)
+                apdq_c = apdq(:,2)
               else
-                apdq = fp(:,i_0,j_0-1)
+                apdq_c = fp(:,i_0,j_0-1)
               end if
-              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_sunder(i)) )*apdq
+              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_sunder(i)) )*apdq_c
               ! lower lower edge:
               if (order .eq. 2) then
-                q1l = qold(:,i_0,j_0-2) !- gradQ(:,2,i_0,j_0-2)*dy/2.d0
-                q1 = qold(:,i_0,j_0-1) !+ gradQ(:,2,i_0,j_0-1)*dy/2.d0
-                aux_un = aux(1,i_0,j_0-2)
-                aux_up = aux(1,i_0,j_0-1)
-                  call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,amdq,apdq,2)
+                  call riemann_solver(qold(:,i_0,j_0-3:j_0-1),qold(:,i_0,j_0-2:j_0),&
+                    aux(1,i_0,j_0-3:j_0-1),aux(1,i_0,j_0-2:j_0),s,fwave,amdq,apdq,2,&
+                    2,dt/dx,mthlim)
+               apdq_c =apdq(:,2)
               else
-                apdq = gp(:,i_0,j_0-1)
+                apdq_c = gp(:,i_0,j_0-1)
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*apdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*apdq_c
               !lower right edge :
               if (order .eq. 2) then
-                q1l = qold(:,i_0,j_0-1) !+ gradQ(:,1,i_0,j_0-1)*dx/2.d0
-                temp_dist = (/ecen_un_x(1,2,i),cen_grid_down(2,i_0,j_0-1)/) &
-                     - cen_grid_down(:,i_0+1,j_0-1)
-                q1 = qold(:,i_0+1,j_0-1) !+ gradQ(:,1,i_0+1,j_0-1)*temp_dist(1)&
-                    ! + gradQ(:,2,i_0+1,j_0-1)*temp_dist(2)
-                aux_un = aux(1,i_0,j_0-1)
-                aux_up = aux(1,i_0+1,j_0-1)
-                call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,amdq,apdq,1)
+                call riemann_solver(qold(:,i_0-1:i_0+1,j_0-1),qold(:,i_0:i_0+2,j_0-1),&
+                  aux(1,i_0-1:i_0+1,j_0-1),aux(1,i_0:i_0+2,j_0-1),s,fwave,amdq,apdq,1,&
+                  2,dt/dx,mthlim)
+                amdq_c = amdq(:,2)
               else
-                amdq = fm(:,i_0+1,j_0)
+                amdq_c = fm(:,i_0+1,j_0)
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*amdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*amdq_c
 
               ! update the corresponding affected cells:
               qnew(:,i_0,j_0) = cm_avg2!(area_sunder(i))/(area_sunder(i)+1)*cm_avg2
@@ -825,11 +730,11 @@ contains
               ! get the cell edge value via gradient:
               ! barrier edge at indexed small cell
             if (order .eq. 2) then
-             q1 = qold2(:,i_0,j_0) !+ gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
-               ! + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
+             q1 = qold2(:,i_0,j_0) + gradQ2(:,1,i_0,j_0)*dist_to_ecen_up(1,1,i) &
+               + gradQ2(:,2,i_0,j_0)*dist_to_ecen_up(2,1,i)   ! at the barrier center
 
-             q1l = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
-               ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
+             q1l = qold(:,i_0,j_0) + gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,1,i) &
+               + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,1,i)
             else
               q1 = qold2(:,i_0,j_0)
               q1l = qold(:,i_0,j_0)
@@ -841,19 +746,15 @@ contains
 
               ! at the left:
             if (order .eq. 2) then
-              q1 = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,4,i) &
-                ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,4,i)   ! at the barrier center
-             aux_up = aux(1,i_0,j_0)
-             temp_dist = ecen_un_x(:,1,i)-cen_grid_down(:,i_0-1,j_0)
-             q1l = qold(:,i_0-1,j_0) !+ gradQ(:,1,i_0-1,j_0)*temp_dist(1) &
-              ! + gradQ(:,2,i_0-1,j_0)*temp_dist(2)
-              call riemann_solver(q1l,q1,aux(1,i_0-1,j_0),aux_up,s,fwave,&
-                  amdq,apdq,1)
+              call riemann_solver(qold(:,i_0-2:i_0,j_0),qold(:,i_0-1:i_0+1,j_0),&
+                aux(1,i_0-2:i_0,j_0),aux(1,i_0-1:i_0+1,j_0),s,fwave,&
+                  amdq,apdq,1,2,dt/dx,mthlim)
+              apdq_c =apdq(:,2)
             else
-              apdq = fp(:,i_0,j_0)
+              apdq_c = fp(:,i_0,j_0)
             end if
             cm_avg2 = cm_avg2 - dt/dx * (1/(area_sunder(i)+&
-                un_area_ij(i_0,j_0+1)))* apdq
+                un_area_ij(i_0,j_0+1)))* apdq_c
 
               ! at the merging neighbor cell edges:
               ! at the barrier edge and moving clockwise
@@ -863,10 +764,10 @@ contains
             y = intersections(2,i) - intersections(2,i-1)
 
             if (order .eq. 2) then
-              q1 = qold(:,i_0,j_0+1)! + gradQ(:,1,i_0,j_0+1)*dist_to_ecen_down(1,1,i-1)&
-                 ! + gradQ(:,2,i_0,j_0+1)*dist_to_ecen_down(2,1,i-1)
-              q1l = qold2(:,i_0,j_0+1) !+ gradQ2(:,1,i_0,j_0+1)*dist_to_ecen_up(1,1,i-1)&
-                ! + gradQ2(:,2,i_0,j_0+1) * dist_to_ecen_up(2,1,i-1)
+              q1 = qold(:,i_0,j_0+1) + gradQ(:,1,i_0,j_0+1)*dist_to_ecen_down(1,1,i-1)&
+                 + gradQ(:,2,i_0,j_0+1)*dist_to_ecen_down(2,1,i-1)
+              q1l = qold2(:,i_0,j_0+1) + gradQ2(:,1,i_0,j_0+1)*dist_to_ecen_up(1,1,i-1)&
+                + gradQ2(:,2,i_0,j_0+1) * dist_to_ecen_up(2,1,i-1)
             else
               q1 = qold(:,i_0,j_0+1)
               q1l = qold2(:,i_0,j_0+1)
@@ -879,51 +780,39 @@ contains
 
               ! left edge of merging neighbor cell:
               if (order .eq. 2) then
-                q1 = qold(:,i_0,j_0+1) !+ gradQ(:,1,i_0,j_0+1)*dist_to_ecen_down(1,2,i-1) &
-                  ! + gradQ(:,2,i_0,j_0+1)*dist_to_ecen_down(2,2,i-1)   ! at the barrier center
-               aux_up = aux(1,i_0,j_0+1)
-               temp_dist = ecen_un_x(:,1,i-1)-cen_grid_down(:,i_0-1,j_0+1)
-               q1l = qold(:,i_0-1,j_0+1) !+ gradQ(:,1,i_0-1,j_0+1)*temp_dist(1) &
-                ! + gradQ(:,2,i_0-1,j_0+1)*temp_dist(2)
-                call riemann_solver(q1l,q1,aux(1,i_0-1,j_0-1),aux_up,s,fwave,&
-                    amdq,apdq,1)
+                call riemann_solver(qold(:,i_0-2:i_0,j_0+1),qold(:,i_0-1:i_0+1,j_0+1),&
+                 aux(1,i_0-2:i_0,j_0+1),aux(1,i_0-1:i_0+1,j_0+1),s,fwave,&
+                    amdq,apdq,1,2,dt/dx,mthlim)
+                apdq_c =apdq(:,2)
               else
-                apdq = fp(:,i_0,j_0+1)
+                apdq_c = fp(:,i_0,j_0+1)
               end if
               cm_avg2 = cm_avg2 - dt/dx * lengths_sunder(3,i-1)* (1/(area_sunder(i)+&
-                  un_area_ij(i_0,j_0+1)))* apdq
+                  un_area_ij(i_0,j_0+1)))* apdq_c
 
              ! lower edge of merging neighbor cell:
              if (order .eq. 2) then
-               q1 = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,3,i) &
-                 ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,3,i)   !
-              aux_up = aux(1,i_0,j_0)
-              temp_dist = ecen_un_y(:,1,i)-cen_grid_down(:,i_0,j_0-1)
-              q1l = qold(:,i_0,j_0-1)! + gradQ(:,1,i_0,j_0-1)*temp_dist(1) &
-               ! + gradQ(:,2,i_0,j_0-1)*temp_dist(2)
-               call riemann_solver(q1l,q1,auxu(1,i_0,j_0-1),aux_up,s,fwave,&
-                 amdq,apdq,2)
+               call riemann_solver(qold(:,i_0,j_0-2:j_0),qold(:,i_0,j_0-1:j_0+1),&
+                aux(1,i_0,j_0-2:j_0),aux(1,i_0,j_0-1:j_0+1),s,fwave,&
+                 amdq,apdq,2,2,dt/dx,mthlim)
+              apdq_c =apdq(:,2)
              else
-               apdq = gp(:,i_0,j_0)
+               apdq_c = gp(:,i_0,j_0)
              end if
              cm_avg2 = cm_avg2 - dt/dx * (1/(area_sunder(i)+&
-               un_area_ij(i_0,j_0+1)))* apdq
+               un_area_ij(i_0,j_0+1)))* apdq_c
 
              ! right edge of merging neighbor cell:
              if (order .eq. 2) then
-              q1l = qold(:,i_0,j_0) !+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,2,i) &
-                ! + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,2,i)
-              aux_up = aux(1,i_0,j_0)
-              temp_dist = ecen_un_x(:,2,i)-cen_grid_down(:,i_0+1,j_0)
-              q1 = qold(:,i_0+1,j_0)!+gradQ(:,1,i_0+1,j_0)*temp_dist(1) &
-                 ! +gradQ(:,2,i_0+1,j_0) * temp_dist(2)
-              call riemann_solver(q1l,q1,aux_up,aux(1,i_0+1,j_0-1),s,fwave,&
-                amdq,apdq,1)
+              call riemann_solver(qold(:,i_0-1:i_0+1,j_0),qold(:,i_0:i_0+2,j_0),&
+                aux(1,i_0-1:i_0+1,j_0),aux(1,i_0:i_0+2,j_0),s,fwave,&
+                amdq,apdq,1,2,dt/dx,mthlim)
+              amdq_c = amdq(:,2)
             else
-              amdq = fm(:,i_0+1,j_0)
+              amdq_c = fm(:,i_0+1,j_0)
             end if
               cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(2,i))*(1/(area_sunder(i)+&
-                  un_area_ij(i_0,j_0+1)))* amdq
+                  un_area_ij(i_0,j_0+1)))* amdq_c
 
             ! update the corresponding affected cells:
             qnew(:,i_0,j_0) = cm_avg2!(area_sunder(i))/(area_sunder(i)+area_sunder(i+1))*cm_avg2
@@ -964,58 +853,51 @@ contains
                 x,y,amdq_wall,apdq_wall,ixy,wall_height)
                 ! the bottom edge
             if (order .eq. 2) then
-                 aux_up = aux(1,i_0,j_0)
-                 aux_un = aux(1,i_0,j_0-1)
-                 q1 = qold(:,i_0,j_0) + gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,4,i) &
-                  + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,4,i)
-                 temp_dist = ecen_un_y(:,1,i) - cen_grid_down(:,i_0,j_0-1)
-                 q1l = qold(:,i_0,j_0-1) +gradQ(:,1,i_0,j_0-1)*temp_dist(1) &
-                    + gradQ(:,2,i_0,j_0-1)*temp_dist(2)
-                 call riemann_solver(q1,q1l,aux_up,aux_un,s,fwave,&
-                  amdq_l,apdq_l,2)
+                 call riemann_solver(qold(:,i_0,j_0-2:j_0),qold(:,i_0,j_0-1:j_0+1),&
+                   aux(1,i_0,j_0-2:j_0),aux(1,i_0,j_0-1:j_0+1),s,fwave,&
+                   amdq_l,apdq_l,2,2,dt/dx,mthlim)
+                   apdq_c = apdq_l(:,2)
             else
-                  amdq_l = gp(:,i_0,j_0)
+                  apdq_c = gp(:,i_0,j_0)
             end if
                   ! the top edge
               if (order .eq. 2) then
-                  aux_un = aux(1,i_0,j_0+1)
-                  q1l = qold(:,i_0,j_0)+ gradQ(:,1,i_0,j_0)*dist_to_ecen_down(1,2,i)&
-                      + gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,2,i)
-                  temp_dist = ecen_un_y(:,2,i) - cen_grid_down(:,i_0,j_0+1)
-                  q1 = qold(:,i_0,j_0+1) + gradQ(:,1,i_0,j_0+1)*temp_dist(1)&
-                     +gradQ(:,2,i_0,j_0+1)*temp_dist(2)
-                  call riemann_solver(q1,q1l,aux_un,aux_up,s,fwave, &
-                     amdq_r,apdq_r,2)
+                  call riemann_solver(qold(:,i_0,j_0-1:j_0+1),qold(:,i_0,j_0:j_0+2),&
+                    aux(1,i_0,j_0-1:j_0+1),aux(1,i_0,j_0:j_0+2),s,fwave, &
+                     amdq_r,apdq_r,2,2,dt/dx,mthlim)
+                   amdq_c = amdq_r(:,2)
               else
-                    apdq_r = gm(:,i_0,j_0+1)
+                    amdq_c = gm(:,i_0,j_0+1)
               end if
             if (area_sunder(i)>0.5d0) then
               cm_avg2 = qold(:,i_0,j_0)
 
                cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(ibot,i)) * &
-                 (1/area_sunder(i)) * amdq_l
+                 (1/area_sunder(i)) * apdq_c
 
               cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(itop,i)) * &
-                 (1/area_sunder(i)) * apdq_r
+                 (1/area_sunder(i)) * amdq_c
             ! the lateral edge
               if (order .eq. 2) then
-                aux_un = aux(1,ilat,j_0)
-                temp_dist = ecen_un_x(:,ilat2,i) - cen_grid_down(:,ilat,j_0)
-                q1l = qold(:,ilat,j_0) + gradQ(:,1,ilat,j_0)*temp_dist(1) &
-                    + gradQ(:,2,ilat,j_0)*temp_dist(2)
-                q1 = qold(:,i_0,j_0) + gradQ(:,1,i_0,j_0)* &
-                  dist_to_ecen_down(1,ibot-1,i) + &
-                     gradQ(:,2,i_0,j_0)*dist_to_ecen_down(2,ibot-1,i)
-                call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,&
-                  amdq,apdq,2)
+               if (type_sunder(i) .eq. 7) then
+                call riemann_solver(qold(:,ilat-1:i_0,j_0),qold(:,ilat:i_0+1,j_0),&
+                  aux(1,ilat-1:i_0,j_0),aux(1,ilat:i_0+1,j_0),s,fwave,&
+                  amdq,apdq,1,2,dt/dx,mthlim)
+                 apdq_c = apdq(:,2)
+               else
+                 call riemann_solver(qold(:,i_0-1:ilat,j_0),qold(:,i_0:ilat+1,j_0),&
+                   aux(1,i_0-1:ilat,j_0),aux(1,i_0:ilat+1,j_0),s,fwave,&
+                   amdq,apdq,1,2,dt/dx,mthlim)
+                  apdq_c = amdq(:,2)
+                end if
               else
                 if (type_sunder(i).eq.2) then
-                  apdq = fm(:,i_0+1,j_0)
+                  apdq_c = fm(:,i_0+1,j_0)
                 else
-                  apdq = fp(:,i_0,j_0)
+                  apdq_c = fp(:,i_0,j_0)
                 end if
               end if
-              cm_avg2 = cm_avg2 - dt/dx * (1/area_sunder(i))*apdq
+              cm_avg2 = cm_avg2 - dt/dx * (1/area_sunder(i))*apdq_c
             ! the barrier edge
                cm_avg2 = cm_avg2 - dt/dx *lengths_sunder(1,i)*(1/(area_sunder(i)))&
                       *apdq_wall
@@ -1030,50 +912,51 @@ contains
                       *apdq_wall
               ! bottom edge:
               cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(ibot,i)) * &
-                (1/( 1+ area_sunder(i)) ) * amdq_l
+                (1/( 1+ area_sunder(i)) ) * apdq_c
               ! top edge:
                cm_avg2 = cm_avg2 - dt/dx * (lengths_sunder(itop,i)) * &
-                  (1/( 1+ area_sunder(i)) ) * apdq_r
+                  (1/( 1+ area_sunder(i)) ) * amdq_c
               ! lateral top edge:
               if (order .eq. 2) then
-                q1l = qold(:,ilat,j_0+1) - gradQ(:,2,ilat,j_0+1)*dy/2.d0
-                q1 = qold(:,ilat,j_0) +  gradQ(:,2,ilat,j_0)*dy/2.d0
-                aux_un = aux(1,ilat,j_0)
-                aux_up = aux(1,ilat,j_0+1)
-                call riemann_solver(q1l,q1,aux_up,aux_un,s,fwave,amdq,apdq,2)
+                call riemann_solver(qold(:,ilat,j_0-1:j_0+1),qold(:,ilat,j_0:j_0+2),&
+                  aux(1,ilat,j_0-1:j_0+1),aux(1,ilat,j_0:j_0+2),s,fwave,amdq,apdq,2,&
+                  2,dt/dx,mthlim)
+                amdq_c = amdq(:,2)
               else
-                apdq = gm(:,ilat,j_0+1)
+                amdq_c = gm(:,ilat,j_0+1)
               end if
-              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_sunder(i)) )*apdq
+              cm_avg2 = cm_avg2 - dt/dx* (1/( 1+ area_sunder(i)) )*amdq_c
               ! lateral lateral edge:
               if (order .eq. 2) then
-                q1l = qold(:,ilat3,j_0) + is* gradQ(:,1,ilat3,j_0)*dx/2.d0
-                q1 = qold(:,ilat,j_0) - is*gradQ(:,1,ilat,j_0)*dx/2.d0
-                aux_un = aux(1,ilat,j_0)
-                aux_up = aux(1,ilat3,j_0)
-                call riemann_solver(q1l,q1,aux_up,aux_un,s,fwave,amdq,apdq,2)
+                if (type_sunder(i) .eq. 7) then
+                  call riemann_solver(qold(:,ilat3-1:ilat,j_0),qold(:,ilat3:ilat+1,j_0),&
+                    aux(1,ilat3-1:ilat,j_0),aux(1,ilat3:ilat+1,j_0),s,fwave,amdq,apdq,1,&
+                    2,dt/dx,mthlim)
+                   apdq_c = apdq(:,2)
+                else
+                  call riemann_solver(qold(:,ilat-1:ilat3,j_0),qold(:,ilat:ilat3+1,j_0),&
+                    aux(1,ilat-1:ilat3,j_0),aux(1,ilat:ilat3+1,j_0),s,fwave,amdq,apdq,1,&
+                    2,dt/dx,mthlim)
+                   apdq_c = amdq(:,2)
+                end if
               else
                 if (type_sunder(i) .eq. 2) then
-                  apdq = fm(:,ilat3,j_0)
+                  apdq_c = fm(:,ilat3,j_0)
                 else
-                  apdq = fp(:,ilat,j_0)
+                  apdq_c = fp(:,ilat,j_0)
                 end if
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*apdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*apdq_c
               !lateral bottom edge :
               if (order .eq. 2) then
-                q1l = qold(:,ilat,j_0) - gradQ(:,2,ilat,j_0)*dy/2.d0
-                temp_dist = (/cen_grid_down(1,ilat,j_0),cen_grid_down(2,ilat,j_0)-dy/2.d0/) &
-                     - cen_grid_down(:,ilat,j_0-1)
-                q1 = qold(:,ilat,j_0-1) + gradQ(:,1,ilat,j_0-1)*temp_dist(1)&
-                    + gradQ(:,2,ilat,j_0-1)*temp_dist(2)
-                aux_un = aux(1,ilat,j_0)
-                aux_up = aux(1,ilat,j_0-1)
-                call riemann_solver(q1l,q1,aux_un,aux_up,s,fwave,amdq,apdq,1)
+                call riemann_solver(qold(:,ilat,j_0-2:j_0),qold(:,ilat,j_0-1:j_0+1),&
+                  aux(1,ilat,j_0-2:j_0),aux(1,ilat,j_0-1:j_0+1),s,fwave,amdq,apdq,2,&
+                  2,dt/dx,mthlim)
+                  apdq_c = apdq(:,2)
               else
-                amdq = gp(:,ilat,j_0)
+                apdq_c = gp(:,ilat,j_0)
               end if
-              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*amdq
+              cm_avg2 = cm_avg2 - dt/dx*(1/(1+area_sunder(i)))*apdq_c
 
               ! update the corresponding affected cells:
               qnew(:,i_0,j_0) =  cm_avg2!(area_sunder(i))/(area_sunder(i)+1)*cm_avg2
@@ -1293,38 +1176,19 @@ contains
       real(8) :: temp3(2,3),temp4(2,3),W3(3,3),W4(4,4)
       integer :: ixy,k,i,ix,iy
 
-     k = size(delQ,2)
-     ix = 0
-     iy = 0
-     nabla = 0.d0
-     do i = 1,k
-       if (delR(1,i) .ne.0) then
-         ix = ix + 1
-         nabla(:,1) = nabla(:,1) + delQ(:,i)/delR(1,i)
-       end if
-       if (delR(2,i) .ne. 0 ) then
-         iy = iy + 1
-         nabla(:,2) = nabla(:,2) + delQ(:,i)/delR(2,i)
-       end if
-     end do
-     nabla(:,1) = nabla(:,1)/ix
-     nabla(:,2) = nabla(:,2)/iy
-    !  if (ixy .eq. 1) then
-    !    temp1 = transpose(delR)
-    !   temp = matmul(delR,temp1)
-    !   temp = matinv2(temp)
-    !   temp3 = matmul(delR,transpose(delQ))
-    !   nabla = transpose(matmul(temp,temp3))
-    ! else
-    !   temp2 = transpose(delR)
-    !   temp = matmul(delR,temp2)
-    !   temp = matinv2(temp)
-    !   temp4 = matmul(delR,transpose(delQ))
-    !   nabla = transpose(matmul(temp,temp4))
-    ! end if
-       ! print *, "delR: ", delR
-       ! print *, "delQ: ", delQ
-       print* , "GRAD Q:: ", nabla
+     if (ixy .eq. 1) then
+       temp1 = transpose(delR)
+      temp = matmul(delR,temp1)
+      temp = matinv2(temp)
+      temp3 = matmul(delR,transpose(delQ))
+      nabla = transpose(matmul(temp,temp3))
+    else
+      temp2 = transpose(delR)
+      temp = matmul(delR,temp2)
+      temp = matinv2(temp)
+      temp4 = matmul(delR,transpose(delQ))
+      nabla = transpose(matmul(temp,temp4))
+    end if
   end function nabla_Q
 
     function nabla_Q_normal(qold,cen_grid,i,j,mx,my,dx,dy) result(nabla)
@@ -1399,17 +1263,12 @@ contains
       real(8) :: q(3),q_rot(3),n_vec(2),t_vec(2)
       real(8) :: vel(2)
 
-      ! if (abs((n_vec(1)**2 + n_vec(2)**2)-1).gt.1d-8) then
-      !   n_vec = n_vec/sqrt((n_vec(1)**2 + n_vec(2)**2))
-      ! end if
-      ! if (abs((t_vec(1)**2 + t_vec(2)**2)-1).gt.1d-8) then
-      !   t_vec = t_vec/sqrt((t_vec(1)**2 + t_vec(2)**2))
-      ! end if
       q_rot(1) = q(1)
       vel = q(2:3)
       q_rot(2) = vel(1)*n_vec(1) + vel(2)*n_vec(2)
       q_rot(3) = vel(1)*t_vec(1) + vel(2)*t_vec(2)
     end subroutine
+
 
 
 
