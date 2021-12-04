@@ -123,7 +123,7 @@ def setup(kernel_language='Fortran', solver_type='classic', use_petsc=False,
 
     claw.run()
 
-    # plot(setplot=setplot,outdir='./_output',plotdir='./_plots_slanted200_2nd',iplot=False,htmlplot=True)
+    plot(setplot=setplot,outdir='./_output',plotdir='./_plots_slanted200_2nd',iplot=False,htmlplot=True)
     #return claw
 
 # functions for plotting:
