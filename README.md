@@ -18,3 +18,5 @@ package.
 Running `python barrier_slanted_CM.py` or `python barrier_V_CM.py` in the 
 examples directory will generate `_output` and a plots folder within the 
 examples directory.
+
+3D plot of barrier blocking a wave from an island: ![frame0005fig0](https://user-images.githubusercontent.com/36740525/146305382-c1152dee-8765-443e-9606-130a9ac8a95d.png)
